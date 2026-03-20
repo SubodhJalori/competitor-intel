@@ -851,7 +851,7 @@ function CompareRow({ brand, data, onSelect, selected, onRemove }) {
 
 // ── Search form ───────────────────────────────────────────────────
 
-function SearchForm({ onSearch, loading }) {
+function SearchForm({ onSearch, loading, rateLimitCountdown = 0 }) {
   const [brand,    setBrand]    = useState("");
   const [industry, setIndustry] = useState("");
   const [country,  setCountry]  = useState("India");
@@ -887,12 +887,12 @@ function SearchForm({ onSearch, loading }) {
       >
         {["India","USA","UK","UAE","Singapore","Global"].map(c => <option key={c}>{c}</option>)}
       </select>
-      <button onClick={submit} disabled={!brand.trim() || loading} style={{
+      <button onClick={submit} disabled={!brand.trim() || loading || rateLimitCountdown > 0} style={{
         padding: "9px 18px", borderRadius: "9px", fontSize: "12.5px", fontWeight: 700,
-        cursor: !brand.trim() || loading ? "not-allowed" : "pointer", fontFamily: "inherit",
+        cursor: !brand.trim() || loading || rateLimitCountdown > 0 ? "not-allowed" : "pointer", fontFamily: "inherit",
         background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.25)",
-        color: brand.trim() ? "#34d399" : "rgba(255,255,255,0.2)", whiteSpace: "nowrap",
-      }}>+ Research</button>
+        color: brand.trim() && !rateLimitCountdown ? "#34d399" : "rgba(255,255,255,0.2)", whiteSpace: "nowrap",
+      }}>{rateLimitCountdown > 0 ? `Wait ${rateLimitCountdown}s` : "+ Research"}</button>
     </div>
   );
 }
@@ -913,10 +913,26 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [error,    setError]    = useState(null);
 
+  const [rateLimitCountdown, setRateLimitCountdown] = useState(0);
+
+  const startCountdown = useCallback((seconds = 60) => {
+    setRateLimitCountdown(seconds);
+    const interval = setInterval(() => {
+      setRateLimitCountdown(prev => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   const anyLoading = Object.values(brands).some(v => v === "loading");
 
   const research = useCallback(async (brand, industry, country) => {
-    if (brands[brand]) return; // already tracked
+    if (brands[brand]) return;
+    if (rateLimitCountdown > 0) {
+      setError(`Rate limit active — please wait ${rateLimitCountdown}s before searching again.`);
+      return;
+    }
     setBrands(prev => ({ ...prev, [brand]: "loading" }));
     setError(null);
     try {
@@ -925,9 +941,14 @@ export default function App() {
       setSelected(brand);
     } catch (err) {
       setBrands(prev => ({ ...prev, [brand]: "error" }));
-      setError(`Failed to research "${brand}": ${err.message}`);
+      if (err.message.includes('Rate limit') || err.message.includes('429')) {
+        setError(`Rate limit reached — searches use a lot of tokens. Wait 60s then try again.`);
+        startCountdown(60);
+      } else {
+        setError(`Failed to research "${brand}": ${err.message}`);
+      }
     }
-  }, [brands]);
+  }, [brands, rateLimitCountdown, startCountdown]);
 
   const remove = useCallback((brand) => {
     setBrands(prev => { const n = { ...prev }; delete n[brand]; return n; });
@@ -972,7 +993,7 @@ export default function App() {
               </h1>
             </div>
             <div style={{ flex: 1 }}>
-              <SearchForm onSearch={research} loading={anyLoading} />
+              <SearchForm onSearch={research} loading={anyLoading} rateLimitCountdown={rateLimitCountdown} />
             </div>
           </div>
 
@@ -996,8 +1017,13 @@ export default function App() {
 
         {/* Error */}
         {error && (
-          <div style={{ padding: "11px 15px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.18)", borderRadius: "9px", color: "#fca5a5", fontSize: "12.5px", marginBottom: "16px" }}>
-            ⚠️ {error}
+          <div style={{ padding: "11px 15px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.18)", borderRadius: "9px", color: "#fca5a5", fontSize: "12.5px", marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+            <span>⚠️ {error}</span>
+            {rateLimitCountdown > 0 && (
+              <span style={{ fontSize: "13px", fontWeight: 800, color: "#fbbf24", background: "rgba(251,191,36,0.1)", padding: "4px 12px", borderRadius: "8px", flexShrink: 0 }}>
+                {rateLimitCountdown}s
+              </span>
+            )}
           </div>
         )}
 

@@ -1,84 +1,52 @@
-// api/competitors.js
-// Discovers the top competitors for any brand using Claude + web search
-// Returns structured competitor cards with key differentiators
+// api/competitors.js — Haiku with short prompt to avoid rate limits
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+const MODEL = 'claude-haiku-4-5-20251001';
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Anthropic API key not configured' });
-
-  const { brand, industry, country = 'India' } = req.body || {};
-  if (!brand) return res.status(400).json({ error: 'Missing brand name' });
-
-  const prompt = `You are a strategy consultant and competitive intelligence analyst.
-
-Identify the top 8 competitors for "${brand}" (industry: ${industry || 'consumer brand'}, country: ${country}).
-
-Search for:
-1. Direct competitors — same product category, same price range, same customer
-2. Indirect competitors — adjacent categories that compete for the same wallet
-3. For each competitor, find: approximate revenue, funding, store count, website domain, what makes them different
-
-Think about this carefully. For example:
-- If brand is "Traya Health" (hair care D2C India) → competitors include: Mamaearth (hair range), Wow Skin Science, Pilgrim, The Derma Co, Minimalist, mCaffeine, Beardo, Just Herbs
-- If brand is "Mokobara" (luggage D2C India) → competitors include: Uppercase, Nasher Miles, Wildcraft, Safari Industries, American Tourister, Skybags, Beetle
-- If brand is "Zomato" (food delivery India) → competitors include: Swiggy, Blinkit, Zepto, Dunzo, Magicpin
-
-Return ONLY raw JSON, no markdown:
-{
-  "brand": "string",
-  "industry": "string",
-  "competitorLandscape": "1-2 sentence description of the competitive landscape",
-  "competitors": [
-    {
-      "name": "Brand name",
-      "domain": "website.com or null",
-      "country": "string",
-      "type": "Direct / Indirect / Emerging",
-      "positioning": "e.g. Mass market / Premium / Niche D2C",
-      "estimatedRevenue": "e.g. ₹200-400 Cr or Unknown",
-      "estimatedFunding": "e.g. $15M or Bootstrapped or Listed or Unknown",
-      "storeCount": number_or_null,
-      "keyDifferentiator": "1 sentence — what makes them different from ${brand}",
-      "threat": "High / Medium / Low",
-      "threatReason": "1 sentence why"
-    }
-  ]
-}`;
-
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+async function callClaude(apiKey, prompt) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 10000));
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
+        model: MODEL, max_tokens: 1500,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }],
       }),
     });
+    if (res.status === 429) { if (attempt === 2) throw new Error('Rate limit — wait 60s and retry'); continue; }
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    const block = data.content?.find(b => b.type === 'text');
+    if (!block) throw new Error('No text in response');
+    return block.text;
+  }
+}
 
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(response.status).json({ error: err });
-    }
+function parseJSON(raw) {
+  const text = raw.trim().replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim();
+  const s = text.indexOf('{'), e = text.lastIndexOf('}');
+  if (s === -1 || e === -1) throw new Error('No JSON in response');
+  return JSON.parse(text.slice(s, e + 1));
+}
 
-    const data = await response.json();
-    const textBlock = data.content?.find(b => b.type === 'text');
-    if (!textBlock) return res.status(500).json({ error: 'No text in response' });
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
+  const { brand, industry, country = 'India' } = req.body || {};
+  if (!brand) return res.status(400).json({ error: 'Missing brand' });
 
-    const raw = textBlock.text.trim()
-      .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s === -1 || e === -1) throw new Error('No JSON in response');
+  const prompt = `List the top 8 competitors for "${brand}" (${industry || 'consumer brand'}, ${country}). Search for recent info.
 
-    return res.status(200).json(JSON.parse(raw.slice(s, e + 1)));
+Return ONLY raw JSON:
+{"brand":"${brand}","industry":"${industry || 'consumer brand'}","competitorLandscape":"1-2 sentence overview","competitors":[{"name":"string","domain":"string or null","country":"${country}","type":"Direct or Indirect or Emerging","positioning":"string","estimatedRevenue":"e.g. ₹200 Cr or Unknown","estimatedFunding":"e.g. $10M or Bootstrapped or Unknown","storeCount":null,"keyDifferentiator":"1 sentence","threat":"High or Medium or Low","threatReason":"1 sentence"}]}`;
+
+  try {
+    const raw = await callClaude(apiKey, prompt);
+    return res.status(200).json(parseJSON(raw));
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Competitor discovery failed' });
+    const status = err.message.includes('Rate limit') ? 429 : 500;
+    return res.status(status).json({ error: err.message });
   }
 }
