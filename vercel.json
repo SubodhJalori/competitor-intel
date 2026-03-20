@@ -1,8 +1,9 @@
 {
   "functions": {
-    "api/research.js":  { "maxDuration": 60 },
-    "api/estimate.js":  { "maxDuration": 30 },
-    "api/stores.js":    { "maxDuration": 20 },
-    "api/traffic.js":   { "maxDuration": 20 }
+    "api/research.js":     { "maxDuration": 60 },
+    "api/competitors.js":  { "maxDuration": 60 },
+    "api/estimate.js":     { "maxDuration": 30 },
+    "api/stores.js":       { "maxDuration": 20 },
+    "api/traffic.js":      { "maxDuration": 60 }
   }
 }

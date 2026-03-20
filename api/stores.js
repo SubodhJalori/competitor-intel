@@ -1,105 +1,130 @@
 // api/stores.js
-// Uses Google Maps Places Text Search API to count store locations
-// for any brand across India (or any specified country)
-// Handles pagination to get accurate total counts
+// Uses TomTom Search API (free - 50,000 calls/day) to count brand store locations
+// Falls back to OpenStreetMap Nominatim (completely free, no key) if TomTom key not set
+// TomTom key: sign up free at developer.tomtom.com
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const mapsKey = process.env.GOOGLE_MAPS_KEY;
-  if (!mapsKey) return res.status(500).json({ error: 'Google Maps API key not configured' });
-
+  const tomtomKey = process.env.TOMTOM_KEY;
   const { brand, country = 'India', maxPages = 3 } = req.body || {};
   if (!brand) return res.status(400).json({ error: 'Missing brand name' });
 
-  const results = [];
-  const cities  = [];
-  let pageToken  = null;
-  let pages      = 0;
+  // Country bounding boxes for better results
+  const COUNTRY_BOUNDS = {
+    'India':       { lat: 20.5937, lon: 78.9629, radius: 2000000 },
+    'USA':         { lat: 37.0902, lon: -95.7129, radius: 3000000 },
+    'UK':          { lat: 55.3781, lon: -3.4360,  radius: 600000  },
+    'UAE':         { lat: 23.4241, lon: 53.8478,  radius: 400000  },
+    'Singapore':   { lat: 1.3521,  lon: 103.8198, radius: 30000   },
+  };
+
+  const bounds = COUNTRY_BOUNDS[country] || COUNTRY_BOUNDS['India'];
 
   try {
-    // Text Search (New) — finds all places matching the brand name
-    // We paginate up to maxPages to get a fuller count
-    do {
-      const body = {
-        textQuery: `${brand} store ${country}`,
-        maxResultCount: 20,
-        languageCode: 'en',
-      };
-      if (pageToken) body.pageToken = pageToken;
+    let stores = [];
+    let source = '';
 
-      const response = await fetch(
-        'https://places.googleapis.com/v1/places:searchText',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': mapsKey,
-            'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.regularOpeningHours,nextPageToken',
-          },
-          body: JSON.stringify(body),
+    if (tomtomKey) {
+      // ── TomTom Fuzzy Search API (free 50K/day) ──
+      // Search for brand POIs within country radius
+      source = 'TomTom';
+      const pages = Math.min(maxPages, 5);
+      const pageSize = 20;
+
+      for (let page = 0; page < pages; page++) {
+        const url = new URL('https://api.tomtom.com/search/2/poiSearch/' + encodeURIComponent(brand) + '.json');
+        url.searchParams.set('key',        tomtomKey);
+        url.searchParams.set('limit',      pageSize);
+        url.searchParams.set('offset',     page * pageSize);
+        url.searchParams.set('lat',        bounds.lat);
+        url.searchParams.set('lon',        bounds.lon);
+        url.searchParams.set('radius',     bounds.radius);
+        url.searchParams.set('countrySet', country === 'India' ? 'IN' : country === 'USA' ? 'US' : country === 'UK' ? 'GB' : country === 'UAE' ? 'AE' : 'IN');
+        url.searchParams.set('language',   'en-GB');
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+          // If key is wrong, fall through to Nominatim
+          break;
         }
-      );
 
-      if (!response.ok) {
-        const err = await response.text();
-        return res.status(response.status).json({ error: `Maps API error: ${err}` });
+        const data = await response.json();
+        const results = data.results || [];
+        if (results.length === 0) break;
+
+        stores.push(...results.map(r => ({
+          name:    r.poi?.name || brand,
+          address: [r.address?.streetName, r.address?.municipality, r.address?.countrySubdivision].filter(Boolean).join(', '),
+          city:    r.address?.municipality || r.address?.localName || '',
+          state:   r.address?.countrySubdivision || '',
+          lat:     r.position?.lat,
+          lon:     r.position?.lon,
+        })));
+
+        if (results.length < pageSize) break; // no more pages
       }
+    }
 
-      const data = await response.json();
-      const places = data.places || [];
-      results.push(...places);
+    // ── Fallback: OpenStreetMap Nominatim (no key, completely free) ──
+    // NOTE: Nominatim has 1 req/sec limit and is better for address lookup than brand search
+    // For brand search without TomTom, we use it with the brand name as a query
+    if (stores.length === 0) {
+      source = 'OpenStreetMap Nominatim';
+      const countryCode = country === 'India' ? 'in' : country === 'USA' ? 'us' : country === 'UK' ? 'gb' : country === 'UAE' ? 'ae' : 'in';
 
-      // Extract unique cities from addresses
-      places.forEach(p => {
-        if (p.formattedAddress) {
-          // Try to extract city from address
-          const parts = p.formattedAddress.split(',');
-          if (parts.length >= 2) {
-            const city = parts[parts.length - 3]?.trim() || parts[parts.length - 2]?.trim();
-            if (city && !cities.includes(city) && city !== country) {
-              cities.push(city);
-            }
-          }
-        }
+      const url = `https://nominatim.openstreetmap.org/search?` + new URLSearchParams({
+        q:              brand,
+        format:         'json',
+        countrycodes:   countryCode,
+        limit:          50,
+        addressdetails: 1,
       });
 
-      pageToken = data.nextPageToken;
-      pages++;
-    } while (pageToken && pages < maxPages);
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'CompetitorIntelTool/1.0' }, // Nominatim requires User-Agent
+      });
 
-    // Deduplicate by name + address to avoid counting same store twice
+      if (response.ok) {
+        const data = await response.json();
+        stores = data.map(r => ({
+          name:    r.display_name?.split(',')[0] || brand,
+          address: r.display_name || '',
+          city:    r.address?.city || r.address?.town || r.address?.village || '',
+          state:   r.address?.state || '',
+          lat:     r.lat,
+          lon:     r.lon,
+        }));
+      }
+    }
+
+    // Deduplicate by address
     const seen = new Set();
-    const unique = results.filter(p => {
-      const key = `${p.displayName?.text}::${p.formattedAddress}`;
-      if (seen.has(key)) return false;
+    const unique = stores.filter(s => {
+      const key = s.address?.slice(0, 40);
+      if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     });
 
-    // Calculate average rating
-    const rated = unique.filter(p => p.rating);
-    const avgRating = rated.length
-      ? (rated.reduce((s, p) => s + p.rating, 0) / rated.length).toFixed(1)
-      : null;
-
-    const totalReviews = unique.reduce((s, p) => s + (p.userRatingCount || 0), 0);
+    // Extract cities
+    const cities = [...new Set(unique.map(s => s.city).filter(Boolean))];
+    const states = [...new Set(unique.map(s => s.state).filter(Boolean))];
 
     return res.status(200).json({
       brand,
       country,
-      totalStores: unique.length,
-      pagesScanned: pages,
-      estimatedTotal: pageToken ? `${unique.length}+` : String(unique.length), // if more pages exist, show +
-      cities: [...new Set(cities)].slice(0, 20),
-      cityCount: [...new Set(cities)].length,
-      avgRating: avgRating ? Number(avgRating) : null,
-      totalReviews,
-      stores: unique.slice(0, 50).map(p => ({
-        name: p.displayName?.text,
-        address: p.formattedAddress,
-        rating: p.rating,
-        reviews: p.userRatingCount,
+      source,
+      totalStores:      unique.length,
+      estimatedTotal:   unique.length >= (maxPages * 20) ? `${unique.length}+` : String(unique.length),
+      cities:           cities.slice(0, 25),
+      states:           states.slice(0, 15),
+      cityCount:        cities.length,
+      hasTomTomKey:     !!tomtomKey,
+      stores:           unique.slice(0, 60).map(s => ({
+        name:    s.name,
+        address: s.address,
+        city:    s.city,
       })),
     });
   } catch (err) {

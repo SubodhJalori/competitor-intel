@@ -119,14 +119,16 @@ function StoresPanel({ brand, country }) {
     <div style={{ padding: "18px", background: "rgba(99,179,237,0.04)", border: "1px solid rgba(99,179,237,0.12)", borderRadius: "14px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
         <div>
-          <div style={{ fontSize: "13px", fontWeight: 700, color: "#63b3ed", marginBottom: "2px" }}>🗺️ Store Count via Google Maps</div>
-          <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)" }}>Live search of Google Maps for "{brand}" locations in {country}</div>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#63b3ed", marginBottom: "2px" }}>🗺️ Store Count — Live Search</div>
+          <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)" }}>
+            Searches for "{brand}" locations in {country} via TomTom (free) or OpenStreetMap
+          </div>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <select value={maxPg} onChange={e => setMaxPg(Number(e.target.value))} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", borderRadius: "7px", padding: "5px 8px", fontSize: "11px", fontFamily: "inherit" }}>
-            <option value={1}>Quick (1 page)</option>
-            <option value={3}>Standard (3 pages)</option>
-            <option value={5}>Deep (5 pages)</option>
+            <option value={1}>Quick (20 results)</option>
+            <option value={3}>Standard (60 results)</option>
+            <option value={5}>Deep (100 results)</option>
           </select>
           <button onClick={run} disabled={loading} style={{
             padding: "7px 14px", borderRadius: "8px", fontSize: "12px", fontWeight: 700,
@@ -137,15 +139,27 @@ function StoresPanel({ brand, country }) {
         </div>
       </div>
 
-      {loading && <Shimmer message="Searching Google Maps for store locations…" />}
+      {loading && <Shimmer message="Searching for store locations…" />}
       {error && <div style={{ fontSize: "12px", color: "#f87171", padding: "10px 14px", background: "rgba(248,113,113,0.08)", borderRadius: "8px" }}>⚠️ {error}</div>}
 
       {data && (
         <div style={{ animation: "fadeIn .3s ease" }}>
+          {/* Source badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+            <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.05)", padding: "2px 9px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.07)" }}>
+              via {data.source}
+            </span>
+            {!data.hasTomTomKey && (
+              <span style={{ fontSize: "10px", color: "rgba(251,191,36,0.7)", background: "rgba(251,191,36,0.07)", padding: "2px 9px", borderRadius: "10px", border: "1px solid rgba(251,191,36,0.15)" }}>
+                💡 Add TOMTOM_KEY for better results (free at developer.tomtom.com)
+              </span>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
-            <Pill label="Stores Found" value={data.estimatedTotal}   color="#63b3ed" sub={`${data.pagesScanned} page(s) scanned`} />
-            <Pill label="Cities"       value={data.cityCount ?? "—"} color="#63b3ed" sub="unique locations" />
-            <Pill label="Avg Rating"   value={data.avgRating ?? "—"} color="#fbbf24" sub={`${fmt(data.totalReviews)} total reviews`} />
+            <Pill label="Stores Found" value={data.estimatedTotal}   color="#63b3ed" sub={`${data.source} data`} />
+            <Pill label="Cities"       value={data.cityCount ?? "—"} color="#63b3ed" sub="unique cities" />
+            {data.states?.length > 0 && <Pill label="States / Regions" value={data.states.length} color="#63b3ed" />}
           </div>
 
           {data.cities?.length > 0 && (
@@ -161,19 +175,19 @@ function StoresPanel({ brand, country }) {
 
           {data.stores?.length > 0 && (
             <div>
-              <SectionHead label={`Store List (first ${data.stores.length})`} />
-              <div style={{ maxHeight: "220px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "5px" }}>
+              <SectionHead label={`Store List (${data.stores.length} shown)`} />
+              <div style={{ maxHeight: "200px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {data.stores.map((s, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: "10px", padding: "7px 10px", background: "rgba(255,255,255,0.02)", borderRadius: "7px", fontSize: "11.5px" }}>
-                    <span style={{ color: "rgba(255,255,255,0.55)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.address}</span>
-                    {s.rating && <span style={{ color: "#fbbf24", flexShrink: 0 }}>★ {s.rating} ({fmt(s.reviews)})</span>}
+                  <div key={i} style={{ padding: "6px 10px", background: "rgba(255,255,255,0.02)", borderRadius: "7px", fontSize: "11.5px", color: "rgba(255,255,255,0.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {s.address}
                   </div>
                 ))}
               </div>
             </div>
           )}
+
           <div style={{ marginTop: "10px", fontSize: "10.5px", color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>
-            Note: Google Maps results may include franchise/distributor locations. Cross-check with brand's official store locator for EBO-only counts.
+            Note: Results may include franchise/distributor outlets. Cross-check with the brand's official store locator for EBO-only counts.
           </div>
         </div>
       )}
@@ -412,18 +426,178 @@ function EstimatePanel({ brand, researchData }) {
   );
 }
 
+// ── CompetitorDiscovery ───────────────────────────────────────────
+
+const THREAT_COLOR = { High: "#f87171", Medium: "#fbbf24", Low: "#34d399" };
+const TYPE_COLOR   = { Direct: "#ff6b6b", Indirect: "#63b3ed", Emerging: "#a78bfa" };
+
+function CompetitorDiscovery({ brand, industry, country, onResearch, trackedBrands }) {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+  const [done,    setDone]    = useState(false);
+
+  const discover = async () => {
+    setLoading(true); setError(null);
+    try {
+      const result = await callAPI("/api/competitors", { brand, industry, country });
+      setData(result);
+      setDone(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!done && !loading) {
+    return (
+      <div style={{ padding: "18px", background: "rgba(251,191,36,0.04)", border: "1px solid rgba(251,191,36,0.14)", borderRadius: "14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#fbbf24", marginBottom: "3px" }}>🔭 Competitor Landscape</div>
+          <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.35)" }}>Discover who {brand} competes with — direct, indirect, and emerging threats</div>
+        </div>
+        <button onClick={discover} style={{
+          padding: "9px 20px", borderRadius: "9px", fontSize: "12.5px", fontWeight: 700,
+          cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+          background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.28)", color: "#fbbf24",
+        }}>Discover Competitors →</button>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <Shimmer message={`Mapping the competitor landscape for ${brand}…`} />;
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: "12px 15px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.18)", borderRadius: "9px", color: "#fca5a5", fontSize: "12.5px" }}>
+        ⚠️ {error} — <button onClick={discover} style={{ background: "none", border: "none", color: "#63b3ed", cursor: "pointer", fontFamily: "inherit", fontSize: "12px" }}>retry</button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <div style={{ animation: "fadeIn .3s ease" }}>
+      {/* Landscape summary */}
+      {data.competitorLandscape && (
+        <div style={{ padding: "13px 16px", background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.14)", borderRadius: "11px", marginBottom: "16px", fontSize: "13px", color: "rgba(255,255,255,0.55)", lineHeight: 1.65 }}>
+          <span style={{ color: "#fbbf24", fontWeight: 700, marginRight: "6px" }}>🗺️ Landscape:</span>
+          {data.competitorLandscape}
+        </div>
+      )}
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "14px", flexWrap: "wrap" }}>
+        {Object.entries(TYPE_COLOR).map(([type, color]) => (
+          <div key={type} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "2px", background: color + "40", border: `1px solid ${color}` }} />
+            <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>{type} Competitor</span>
+          </div>
+        ))}
+        <div style={{ marginLeft: "auto", fontSize: "11px", color: "rgba(255,255,255,0.25)" }}>Click any card to research → </div>
+      </div>
+
+      {/* Competitor cards grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "10px" }}>
+        {data.competitors?.map((comp, i) => {
+          const typeColor   = TYPE_COLOR[comp.type]   ?? "#94a3b8";
+          const threatColor = THREAT_COLOR[comp.threat] ?? "#94a3b8";
+          const alreadyTracked = !!trackedBrands[comp.name];
+
+          return (
+            <div
+              key={i}
+              onClick={() => !alreadyTracked && onResearch(comp.name, data.industry, country)}
+              style={{
+                position: "relative",
+                background: alreadyTracked ? "rgba(52,211,153,0.05)" : "rgba(255,255,255,0.025)",
+                border: `1px solid ${alreadyTracked ? "rgba(52,211,153,0.25)" : typeColor + "30"}`,
+                borderRadius: "13px",
+                padding: "15px 16px",
+                cursor: alreadyTracked ? "default" : "pointer",
+                transition: "all .18s",
+              }}
+              onMouseEnter={e => { if (!alreadyTracked) { e.currentTarget.style.background = typeColor + "10"; e.currentTarget.style.borderColor = typeColor + "50"; e.currentTarget.style.transform = "translateY(-1px)"; }}}
+              onMouseLeave={e => { if (!alreadyTracked) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; e.currentTarget.style.borderColor = typeColor + "30"; e.currentTarget.style.transform = "translateY(0)"; }}}
+            >
+              {/* Type badge */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+                <span style={{ fontSize: "9px", fontWeight: 700, color: typeColor, background: typeColor + "18", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.8px", textTransform: "uppercase" }}>{comp.type}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: threatColor }} title={`${comp.threat} threat`} />
+                  <span style={{ fontSize: "9px", color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.8px" }}>{comp.threat} threat</span>
+                </div>
+              </div>
+
+              {/* Name + domain */}
+              <div style={{ marginBottom: "8px" }}>
+                <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", marginBottom: "2px", letterSpacing: "-0.3px" }}>{comp.name}</div>
+                {comp.domain && <div style={{ fontSize: "10.5px", color: "rgba(255,255,255,0.3)" }}>{comp.domain}</div>}
+              </div>
+
+              {/* Key stats */}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+                {comp.estimatedRevenue && comp.estimatedRevenue !== "Unknown" && (
+                  <div style={{ fontSize: "10.5px", color: "#34d399", background: "rgba(52,211,153,0.08)", padding: "2px 8px", borderRadius: "6px" }}>
+                    {comp.estimatedRevenue}
+                  </div>
+                )}
+                {comp.estimatedFunding && comp.estimatedFunding !== "Unknown" && (
+                  <div style={{ fontSize: "10.5px", color: "#a78bfa", background: "rgba(167,139,250,0.08)", padding: "2px 8px", borderRadius: "6px" }}>
+                    {comp.estimatedFunding}
+                  </div>
+                )}
+                {comp.storeCount != null && (
+                  <div style={{ fontSize: "10.5px", color: "#63b3ed", background: "rgba(99,179,237,0.08)", padding: "2px 8px", borderRadius: "6px" }}>
+                    {comp.storeCount} stores
+                  </div>
+                )}
+              </div>
+
+              {/* Differentiator */}
+              <p style={{ margin: "0 0 8px", fontSize: "11.5px", color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>{comp.keyDifferentiator}</p>
+
+              {/* Threat reason */}
+              {comp.threatReason && (
+                <p style={{ margin: 0, fontSize: "10.5px", color: `${threatColor}99`, lineHeight: 1.4, fontStyle: "italic" }}>{comp.threatReason}</p>
+              )}
+
+              {/* CTA or tracked badge */}
+              <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                {alreadyTracked ? (
+                  <span style={{ fontSize: "10.5px", color: "#34d399", fontWeight: 700 }}>✓ Already researched</span>
+                ) : (
+                  <span style={{ fontSize: "10.5px", color: typeColor, fontWeight: 600 }}>Click to research →</span>
+                )}
+                {comp.positioning && (
+                  <span style={{ fontSize: "9.5px", color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.05)", padding: "2px 7px", borderRadius: "6px" }}>{comp.positioning}</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Brand Report ──────────────────────────────────────────────────
 
 const TABS = [
-  { id: "overview",  label: "📊 Overview" },
-  { id: "financial", label: "💰 Financials" },
-  { id: "stores",    label: "🗺️ Stores" },
-  { id: "online",    label: "📈 Online" },
-  { id: "estimate",  label: "📐 Estimator" },
-  { id: "news",      label: "📰 News" },
+  { id: "overview",     label: "📊 Overview" },
+  { id: "financial",    label: "💰 Financials" },
+  { id: "stores",       label: "🗺️ Stores" },
+  { id: "online",       label: "📈 Online" },
+  { id: "competitors",  label: "🔭 Competitors" },
+  { id: "estimate",     label: "📐 Estimator" },
+  { id: "news",         label: "📰 News" },
 ];
 
-function BrandReport({ data, onClose }) {
+function BrandReport({ data, onClose, onResearch, trackedBrands }) {
   const [tab, setTab] = useState("overview");
   const { financials, funding, retail, online, employees, recentNews, statedGoals, dataGaps, analystNote, dataQuality } = data;
   const rev  = financials?.latestRevenue;
@@ -580,6 +754,19 @@ function BrandReport({ data, onClose }) {
           )}
           {/* Live traffic analyser */}
           <TrafficPanel brand={data.brand} domain={data.domain ?? online?.domain} industry={data.industry} />
+        </div>
+      )}
+
+      {/* COMPETITORS */}
+      {tab === "competitors" && (
+        <div style={{ animation: "fadeIn .2s ease" }}>
+          <CompetitorDiscovery
+            brand={data.brand}
+            industry={data.industry}
+            country={data.country ?? "India"}
+            onResearch={onResearch}
+            trackedBrands={trackedBrands}
+          />
         </div>
       )}
 
@@ -792,11 +979,11 @@ export default function App() {
           {/* Data source badges */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {[
-              { label: "📑 Tofler / RoC",   tip: "Indian company MCA filings" },
-              { label: "🗺️ Google Maps",     tip: "Live store count search" },
-              { label: "📊 Similarweb",      tip: "Website traffic estimation" },
+              { label: "📑 Tofler / RoC",    tip: "Indian company MCA filings" },
+              { label: "🗺️ TomTom / OSM",    tip: "Free store count — no Google Maps needed" },
+              { label: "📊 Similarweb",       tip: "Website traffic estimation" },
               { label: "📰 Entrackr / Inc42", tip: "Startup funding & revenue news" },
-              { label: "🌐 Web Search",      tip: "Claude searches 10+ sources" },
+              { label: "🌐 Web Search",       tip: "Claude searches 10+ sources" },
             ].map(b => (
               <span key={b.label} title={b.tip} style={{ fontSize: "10.5px", color: "rgba(255,255,255,0.35)", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", padding: "3px 10px", borderRadius: "20px" }}>{b.label}</span>
             ))}
@@ -858,7 +1045,7 @@ export default function App() {
 
         {/* Detail report */}
         {selectedData && (
-          <BrandReport key={selected} data={selectedData} onClose={() => setSelected(null)} />
+          <BrandReport key={selected} data={selectedData} onClose={() => setSelected(null)} onResearch={research} trackedBrands={brands} />
         )}
       </main>
     </div>
